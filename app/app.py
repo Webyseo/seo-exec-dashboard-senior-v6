@@ -10,8 +10,7 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 
-from openai import OpenAI
-import json
+
 
 from db import init_db, add_dataset, list_datasets, get_dataset, delete_dataset
 from utils import (
@@ -391,19 +390,7 @@ def page_dashboard(meta, df):
     df_prep = prepare_df(df, domains=domains, primary_domain=primary, non_rank_value=int(non_rank))
 
     # ===== Helper: register contexts for AI
-    if "llm_contexts" not in st.session_state:
-        st.session_state["llm_contexts"] = {}
 
-    def _register_ctx(key: str, df_ctx: pd.DataFrame, description: str):
-        if df_ctx is None:
-            return
-        df_ui = humanize_df(df_ctx, primary_domain=primary)
-        df_ui = coerce_numeric_for_display(df_ui)
-        # Store a small copy (avoid huge memory)
-        st.session_state["llm_contexts"][key] = {
-            "description": description,
-            "df": df_ui.copy()
-        }
 
     # ===== Compute best competitor (gap / threats)
     comp_domains = [d for d in domains if d != primary]
@@ -476,11 +463,11 @@ def page_dashboard(meta, df):
     threats_tbl = _action_tbl(threats)
 
     # ===== Main tabs
-    tabA, tabB, tabC, tabD, tabE = st.tabs([
+    # ===== Main tabs
+    tabA, tabB, tabC, tabD = st.tabs([
         "📌 Acción (1 vistazo)",
         "📊 Análisis",
         "✍️ Backlog copy",
-        "🤖 IA (interpretación)",
         "🧼 Datos & definiciones",
     ])
 
@@ -499,7 +486,7 @@ def page_dashboard(meta, df):
             df_display = coerce_numeric_for_display(df_ui)
             cfg = build_column_config(df_display)
             safe_dataframe(df_display, column_config=cfg, use_container_width=True, hide_index=True)
-            _register_ctx(ctx_name, df_display, ctx_desc)
+
             st.download_button(
                 "⬇️ Descargar CSV",
                 data=df_display.to_csv(index=False).encode("utf-8"),
@@ -569,7 +556,7 @@ def page_dashboard(meta, df):
             tbl_ui = coerce_numeric_for_display(tbl_ui)
             cfg = build_column_config(tbl_ui)
             safe_dataframe(tbl_ui, column_config=cfg, use_container_width=True, hide_index=True)
-            _register_ctx("SoV · Market Share", tbl_ui, "Tabla de Share of Voice (% visibilidad) por dominio.")
+
 
         st.divider()
 
@@ -607,7 +594,7 @@ def page_dashboard(meta, df):
             )
             fig.update_xaxes(type="category")
             st.plotly_chart(fig, use_container_width=True)
-            _register_ctx("Tendencia · SoV histórico", trend, "Evolución del SoV del dominio principal a lo largo de los datasets del proyecto.")
+
         else:
             st.info("Aún no hay suficiente histórico (sube más de un CSV) para ver tendencias.")
 
@@ -656,9 +643,7 @@ def page_dashboard(meta, df):
         if hovertemplate:
             fig.update_traces(hovertemplate=hovertemplate, hoverlabel=dict(namelength=-1))
         st.plotly_chart(fig, use_container_width=True)
-        ctx_cols = [c for c in ["Keyword","Grupo","Volumen","KD","CPC (€)","Posición","Ganancia Top3 (clics)","Competidor","Posición competidor"] if c in scatter_ui.columns]
-        _register_ctx("Scatter · Prioridades", scatter_ui[ctx_cols].head(200),
-                      "Puntos (keywords) para el scatter de prioridades.")
+
 
     # =========================
     # TAB C — Copywriter backlog
@@ -724,7 +709,7 @@ def page_dashboard(meta, df):
         backlog_render = backlog_ui.round({"KD":1,"CPC (€)":2,"Ganancia Top3 (clics)":0,"Valor Top3 (€)":0})
         cfg = build_column_config(backlog_ui)
         safe_dataframe(backlog_render, column_config=cfg, use_container_width=True, hide_index=True)
-        _register_ctx("Backlog · Copywriters", backlog_ui.head(60), "Backlog priorizado para copywriters con acción sugerida y métricas de impacto.")
+
 
         st.download_button(
             "⬇️ Descargar backlog (CSV)",
@@ -734,153 +719,12 @@ def page_dashboard(meta, df):
             use_container_width=True,
         )
 
-    # =========================
-    # TAB D — AI interpretation
-    # =========================
-    with tabD:
-        st.markdown("#### IA para interpretar y redactar conclusiones (opcional)")
-        st.caption("La IA NO es obligatoria: el dashboard funciona sin ella. Úsala para generar informes y briefs.")
-        st.warning(
-            "Seguridad: la API key debe usarse **solo en servidor** y no debe exponerse en el navegador. "
-            "En local estás bien; en producción guarda la clave como variable de entorno."
-        )
 
-        # Key handling
-        env_key = os.getenv("OPENAI_API_KEY", "")
-        if env_key:
-            st.success("✅ API Key autenticada por el sistema (modo seguro).")
-            st.session_state["OPENAI_API_KEY"] = env_key
-            api_key = env_key
-        else:
-            api_key = st.text_input("OpenAI API key", type="password", value=st.session_state.get("OPENAI_API_KEY", ""))
-            if api_key:
-                st.session_state["OPENAI_API_KEY"] = api_key
-
-        model_choices = [
-            "gpt-5.2",
-            "gpt-5.1",
-            "gpt-5-mini",
-            "gpt-5-nano",
-            "gpt-4.1",
-            "gpt-4.1-mini",
-            "gpt-4o",
-            "gpt-4o-mini",
-        ]
-        model = st.selectbox("Modelo", model_choices, index=2)
-        max_out = st.slider("Máx. tokens de salida", min_value=256, max_value=4096, value=1200, step=64)
-
-        contexts = st.session_state.get("llm_contexts", {})
-        if not contexts:
-            st.info("Aún no hay contextos disponibles para analizar (navega por las pestañas para generarlos).")
-            return
-
-        ctx_key = st.selectbox("Elemento del dashboard a interpretar", list(contexts.keys()))
-        ctx = contexts[ctx_key]
-        st.write("**Contexto seleccionado:**", ctx["description"])
-        ctx_preview = humanize_df(ctx["df"].head(20), primary_domain=primary)
-        ctx_preview = coerce_numeric_for_display(ctx_preview)
-        cfg = build_column_config(ctx_preview)
-        safe_dataframe(ctx_preview, column_config=cfg, use_container_width=True, hide_index=True)
-
-        audience = st.radio("Audiencia del informe", ["Dirección", "Copywriters"], horizontal=True, index=0)
-        tone = st.selectbox("Formato", ["Bullets ejecutivos", "Informe (1 página)", "Checklist de acciones"], index=0)
-
-        user_extra = st.text_area("Instrucciones extra (opcional)", value="", placeholder="Ej: enfócate en cursos de locución, prioriza ROI, etc.")
-
-        if st.button("🧠 Generar informe con IA", use_container_width=True, disabled=not bool(api_key)):
-            try:
-                client = OpenAI(api_key=api_key)
-                sys = (
-                    "Eres un analista SEO senior. Interpreta datos de un dashboard de posicionamiento y competencia. "
-                    "Sé directo, accionable y evita jerga."
-                )
-                if audience == "Dirección":
-                    goal = (
-                        "Escribe conclusiones ejecutivas: qué significa, qué riesgo/oportunidad hay, "
-                        "y las 5 decisiones recomendadas para los próximos 14 días."
-                    )
-                else:
-                    goal = (
-                        "Escribe un brief para copywriters: qué contenidos crear/actualizar, estructura sugerida, "
-                        "y una lista de tareas priorizadas."
-                    )
-
-                fmt = {
-                    "Bullets ejecutivos": "Devuelve 10–15 bullets muy claros y priorizados.",
-                    "Informe (1 página)": "Devuelve un informe breve (máx 350–500 palabras) + 5 acciones.",
-                    "Checklist de acciones": "Devuelve checklist con tareas, dueño (SEO/Copy), y criterio de éxito.",
-                }[tone]
-                payload = (
-                    f"Contexto: {ctx_key}\n"
-                    f"Descripción: {ctx['description']}\n\n"
-                    f"Datos (CSV):\n{df_to_csv_snippet(ctx['df'])}\n\n"
-                    f"Objetivo: {goal}\n"
-                    f"Formato: {fmt}\n"
-                )
-                if user_extra.strip():
-                    payload += f"\nInstrucciones extra del usuario: {user_extra.strip()}\n"
-
-                resp = client.responses.create(
-                    model=model,
-                    instructions=sys,
-                    input=payload,
-                    max_output_tokens=int(max_out),
-                )
-                # openai python sdk exposes output_text convenience on response
-                out_text = getattr(resp, "output_text", None)
-                if not out_text:
-                    # Fallback: try to join message outputs if present
-                    out_text = str(resp)
-                st.success("Informe generado")
-                st.markdown(out_text)
-
-                st.markdown("---")
-                st.write("**Descargar informe**")
-                d1, d2, d3, d4 = st.columns(4)
-                with d1:
-                    st.download_button(
-                        "⬇️ TXT",
-                        data=out_text.encode("utf-8"),
-                        file_name=f"informe_ia_{meta['project']}_{meta['period']}.txt",
-                        mime="text/plain",
-                        use_container_width=True,
-                    )
-                with d2:
-                    st.download_button(
-                        "⬇️ CSV",
-                        data=text_to_csv_bytes(out_text),
-                        file_name=f"informe_ia_{meta['project']}_{meta['period']}.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                    )
-                with d3:
-                    try:
-                        pdf_bytes = text_to_pdf_bytes(f"Informe IA · {meta['project']} · {meta['period']}", out_text)
-                        st.download_button(
-                            "⬇️ PDF",
-                            data=pdf_bytes,
-                            file_name=f"informe_ia_{meta['project']}_{meta['period']}.pdf",
-                            mime="application/pdf",
-                            use_container_width=True,
-                        )
-                    except Exception as _pdf_err:
-                        st.caption(f"No se pudo generar PDF: {_pdf_err}")
-                with d4:
-                    st.download_button(
-                        "⬇️ MD",
-                        data=out_text.encode("utf-8"),
-                        file_name=f"informe_ia_{meta['project']}_{meta['period']}.md",
-                        mime="text/markdown",
-                        use_container_width=True,
-                    )
-
-            except Exception as e:
-                st.error(f"Error llamando a OpenAI: {e}")
 
     # =========================
     # TAB E — Data hygiene and definitions
     # =========================
-    with tabE:
+    with tabD:
         st.markdown("#### Cómo se calculan las métricas (para que el cliente confíe)")
         st.markdown(
             f"""
