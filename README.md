@@ -44,17 +44,7 @@ Cada import se guarda y puedes navegar el histórico.
 
 
 
-## IA (opcional): interpretaciones y briefs
-- El dashboard funciona **sin IA**.
-- Si quieres usar IA, pega tu API key en la pestaña **🤖 IA (interpretación)** o define una variable de entorno en el servidor:
 
-```bash
-export OPENAI_API_KEY="TU_API_KEY"
-```
-
-Notas de seguridad:
-- En **producción**, no expongas la API key en frontend. Este dashboard la usa en **server-side** (Streamlit).
-- Para equipos: usa una key de **Project** con permisos y límites (rate limits) adecuados.
 
 ## Estructura de datos
 - Puedes subir múltiples CSV con la misma estructura.
