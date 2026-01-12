@@ -1,0 +1,11 @@
+services:
+  seo_dashboard:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PRIMARY_DOMAIN=radiofonics.com
+      - NON_RANK_VALUE=21
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
