@@ -746,9 +746,15 @@ def page_dashboard(meta, df):
         )
 
         # Key handling
-        api_key = st.text_input("OpenAI API key", type="password", value=st.session_state.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY","")))
-        if api_key:
-            st.session_state["OPENAI_API_KEY"] = api_key
+        env_key = os.getenv("OPENAI_API_KEY", "")
+        if env_key:
+            st.success("✅ API Key autenticada por el sistema (modo seguro).")
+            st.session_state["OPENAI_API_KEY"] = env_key
+            api_key = env_key
+        else:
+            api_key = st.text_input("OpenAI API key", type="password", value=st.session_state.get("OPENAI_API_KEY", ""))
+            if api_key:
+                st.session_state["OPENAI_API_KEY"] = api_key
 
         model_choices = [
             "gpt-5.2",
